@@ -29,9 +29,6 @@ import random
 
 from pacman import Directions, GameState
 from pacman_utils.game import Agent
-from pacman_utils import util
-
-import numpy as np
 
 
 class GameStateFeatures:
@@ -50,7 +47,6 @@ class GameStateFeatures:
         """
 
         "*** YOUR CODE HERE ***"
-        # util.raiseNotDefined()
         self.state = state
 
     def __eq__(self, other):
@@ -327,44 +323,7 @@ class QLearnAgent(Agent):
             The reward assigned for the given trajectory
         """
         "*** YOUR CODE HERE ***"
-        # util.raiseNotDefined()
-        features = startState.getFeatureVector()
-        # print(f"features: {features}")
-        score = endState.state.getScore()
-        prevScore = startState.state.getScore()
-        # print("computeReward Score: ", score)
-
-        key = (
-            # pacman_position,
-            # tuple(ghost_positions), # list -> tuple
-            # str(food_locations), # grid object -> tuples
-            tuple(features),
-            self.prevAction
-        )
-        # if key not in self.Q:
-        #     reward = score if prevScore is None else score - prevScore
-        #     self.Q[key] = reward
-        #     self.N[key] = 1
-        # else:
-        #     reward = (score - prevScore - self.Q[key]) / self.N[key]
-        #     self.Q[key] += reward
-        #     self.N[key] += 1
-        reward = score if prevScore is None else score - prevScore
-        reward -= 500 if sum(features[0:3]) == 3 else 0
-        reward -= 5 if score < prevScore else 0
-        if key not in self.Q:
-            self.Q[key] = reward
-            self.N[key] = 1
-        else:
-            self.Q[key] += reward
-            self.N[key] += 1
-        # for key in self.Q:
-        #     print("Key:", key)
-        #     print("Q:", self.Q[key])
-        #     print("N:", self.N.get(key))
-        #     print("-" * 40)
-        # print(f"reward: {reward}")
-        return reward
+        return endState.state.getScore() - startState.state.getScore()
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -380,7 +339,7 @@ class QLearnAgent(Agent):
             Q(state, action)
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        return self.Q.get((tuple(state.getFeatureVector()), action), 0.0)
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -393,7 +352,13 @@ class QLearnAgent(Agent):
             q_value: the maximum estimated Q-value attainable from the state
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        legal = state.state.getLegalPacmanActions()
+        if Directions.STOP in legal:
+            legal.remove(Directions.STOP)
+        # Terminal state — no successors, so future value is zero
+        if not legal:
+            return 0.0
+        return max(self.getQValue(state, a) for a in legal)
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -412,7 +377,10 @@ class QLearnAgent(Agent):
             reward: the reward received on this trajectory
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        key = (tuple(state.getFeatureVector()), action)
+        current_q = self.Q.get(key, 0.0)
+        target = reward + self.gamma * self.maxQValue(nextState)
+        self.Q[key] = current_q + self.alpha * (target - current_q)
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -427,7 +395,8 @@ class QLearnAgent(Agent):
             action: Action taken
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        key = (tuple(state.getFeatureVector()), action)
+        self.N[key] = self.N.get(key, 0) + 1
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -443,7 +412,7 @@ class QLearnAgent(Agent):
             Number of times that the action has been taken in a given state
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        return self.N.get((tuple(state.getFeatureVector()), action), 0)
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -464,12 +433,10 @@ class QLearnAgent(Agent):
             The exploration value
         """
         "*** YOUR CODE HERE ***"
-        N = 10
-        if counts < N:
-            return 10.0
+        if counts < self.maxAttempts:
+            return utility + (1e4 / (counts + 1))
         else:
             return utility
-        # util.raiseNotDefined()
 
     # WARNING: You will be tested on the functionality of this method
     # DO NOT change the function signature
@@ -522,19 +489,13 @@ class QLearnAgent(Agent):
         # 2. Update Q-value from previous step, if this is not the first move
         if self.prevState is not None:
             reward = self.computeReward(self, self.prevState, stateFeatures)
-            if self.N.get((current_features, self.prevAction), 0) < self.maxAttempts:
-                reward += 50
+            # if self.N.get((current_features, self.prevAction), 0) < self.maxAttempts:
+            #     reward += 50
             # if self.learned:
             #     self.learned[-1][3] = current_features
             #     self.learned[-1][2] = reward
             # print(f"prev to current reward: {reward}")
-            # actions = [self.Q.get((current_features, a), 0) for a in legal]
-            # print(f"possible actions: {actions}")
-            max_q_next = max([self.Q.get((current_features, a), 0) for a in legal])
-            # print(f"max_q_next (for previous): {max_q_next}")
-            prev_key = (tuple(self.prevState.getFeatureVector()), self.prevAction)
-            # print(f"prev_key: {prev_key}")
-            self.Q[prev_key] = self.Q.get(prev_key, 0) + self.alpha * (reward + self.gamma * max_q_next - self.Q.get(prev_key, 0))
+            self.learn(self.prevState, self.prevAction, reward, stateFeatures)
 
         # 3. Choose next action using current state
         # actions = self.getPossibleActions(current_features)
@@ -545,13 +506,15 @@ class QLearnAgent(Agent):
         if random.random() < self.epsilon:
             action = random.choice(legal)
         else:
-            action = max(legal, key=lambda a: self.Q.get((current_features, a), 0))
+            action = max(legal, key=lambda a: self.explorationFn(self.getQValue(stateFeatures, a), self.getCount(stateFeatures, a)))
         # else:
         #     action = random.choice(legal)
 
         # self.learned.append(
         #     [current_features, action, None, None]
         # )
+
+        self.updateCount(stateFeatures, action)
 
         # 4. Remember current state and chosen action for next update
         self.prevState = stateFeatures
@@ -569,17 +532,10 @@ class QLearnAgent(Agent):
         if self.prevState is not None:
             # compute reward for final transition
             stateFeatures = GameStateFeatures(state)
-            reward = stateFeatures.state.getScore() - self.prevState.state.getScore()
-
-            prev_key = (tuple(self.prevState.getFeatureVector()), self.prevAction)
+            reward = self.computeReward(self, self.prevState, stateFeatures)
 
             # no future Q term because terminal state
-            self.Q[prev_key] = self.Q.get(prev_key, 0) + self.alpha * (
-                reward - self.Q.get(prev_key, 0)
-            )
-            if prev_key not in self.N:
-                self.N[prev_key] = 0
-            self.N[prev_key] += 1
+            self.learn(self.prevState, self.prevAction, reward, stateFeatures)
 
             # self.learned[-1][3] = current_features
             # self.learned[-1][2] = reward
